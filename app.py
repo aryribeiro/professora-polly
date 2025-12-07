@@ -247,10 +247,10 @@ html_code = """
             recognition.onresult = (event) => {
                 const transcript = event.results[0][0].transcript;
                 console.log('Você disse:', transcript);
+                status.textContent = '⏳ Processando...';
                 
                 // Enviar para Streamlit
                 window.parent.postMessage({type: 'streamlit:setComponentValue', value: transcript}, '*');
-                status.textContent = '⏳ Aguardando resposta...';
             };
             
             recognition.onend = () => {
@@ -317,53 +317,55 @@ html_code = """
 # Inicializar session state
 if 'messages' not in st.session_state:
     st.session_state.messages = []
-if 'audio_to_play' not in st.session_state:
-    st.session_state.audio_to_play = None
 
 # Processar nova mensagem
 user_input = components.html(html_code, height=600)
 
 if user_input and isinstance(user_input, str) and len(user_input.strip()) > 0:
     if user_input not in [msg.get('input') for msg in st.session_state.messages]:
-        with st.spinner('🤔 Pensando...'):
-            try:
-                # Gerar resposta
-                response = bedrock.converse(
-                    modelId='amazon.nova-pro-v1:0',
-                    messages=[{"role": "user", "content": [{"text": user_input.strip()}]}],
-                    system=[{"text": SYSTEM_PROMPT}],
-                    inferenceConfig={"temperature": 0.8, "topP": 0.9, "maxTokens": 100}
-                )
-                
-                response_text = response['output']['message']['content'][0]['text']
-                
-                # Converter para áudio
-                polly_response = polly.synthesize_speech(
-                    Text=response_text,
-                    OutputFormat='mp3',
-                    VoiceId='Camila',
-                    Engine='neural'
-                )
-                
-                audio_bytes = polly_response['AudioStream'].read()
-                
-                # Salvar e tocar IMEDIATAMENTE
-                st.session_state.messages.append({'input': user_input, 'response': response_text})
-                st.success(f"🗣️ Você: {user_input}")
-                st.info(f"🎓 Professora: {response_text}")
-                st.audio(audio_bytes, format='audio/mp3', autoplay=True)
-                
-            except Exception as e:
-                st.error(f"Erro: {str(e)}")
-
-# Histórico
-if st.session_state.messages:
-    with st.expander("📝 Histórico (clique para ver)"):
-        for msg in st.session_state.messages[-5:]:
-            st.write(f"🗣️ **Você:** {msg['input']}")
-            if 'response' in msg:
-                st.write(f"🎓 **Professora:** {msg['response']}")
-            st.divider()
+        try:
+            # Gerar resposta
+            response = bedrock.converse(
+                modelId='amazon.nova-pro-v1:0',
+                messages=[{"role": "user", "content": [{"text": user_input.strip()}]}],
+                system=[{"text": SYSTEM_PROMPT}],
+                inferenceConfig={"temperature": 0.8, "topP": 0.9, "maxTokens": 100}
+            )
+            
+            response_text = response['output']['message']['content'][0]['text']
+            
+            # Converter para áudio
+            polly_response = polly.synthesize_speech(
+                Text=response_text,
+                OutputFormat='mp3',
+                VoiceId='Camila',
+                Engine='neural'
+            )
+            
+            audio_bytes = polly_response['AudioStream'].read()
+            audio_b64 = base64.b64encode(audio_bytes).decode()
+            
+            # Salvar
+            st.session_state.messages.append({
+                'input': user_input,
+                'response': response_text,
+                'audio': audio_b64
+            })
+            
+            # Injetar áudio no iframe
+            components.html(f"""
+            <script>
+                const audioB64 = '{audio_b64}';
+                const audioBytes = Uint8Array.from(atob(audioB64), c => c.charCodeAt(0));
+                const audioBlob = new Blob([audioBytes], {{type: 'audio/mpeg'}});
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioUrl);
+                audio.play();
+            </script>
+            """, height=0)
+            
+        except Exception as e:
+            st.error(f"Erro: {str(e)}")
 
 # Footer
 st.markdown("---")
