@@ -325,41 +325,45 @@ user_input = components.html(html_code, height=600)
 
 if user_input and isinstance(user_input, str) and len(user_input.strip()) > 0:
     if user_input not in [msg.get('input') for msg in st.session_state.messages]:
-        try:
-            # Gerar resposta
-            response = bedrock.converse(
-                modelId='amazon.nova-pro-v1:0',
-                messages=[{"role": "user", "content": [{"text": user_input.strip()}]}],
-                system=[{"text": SYSTEM_PROMPT}],
-                inferenceConfig={"temperature": 0.8, "topP": 0.9, "maxTokens": 100}
-            )
-            
-            response_text = response['output']['message']['content'][0]['text']
-            
-            # Converter para áudio
-            polly_response = polly.synthesize_speech(
-                Text=response_text,
-                OutputFormat='mp3',
-                VoiceId='Camila',
-                Engine='neural'
-            )
-            
-            audio_bytes = polly_response['AudioStream'].read()
-            audio_b64 = base64.b64encode(audio_bytes).decode()
-            
-            # Salvar mensagem
-            st.session_state.messages.append({'input': user_input})
-            st.session_state.audio_to_play = audio_b64
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"Erro: {str(e)}")
+        with st.spinner('🤔 Pensando...'):
+            try:
+                # Gerar resposta
+                response = bedrock.converse(
+                    modelId='amazon.nova-pro-v1:0',
+                    messages=[{"role": "user", "content": [{"text": user_input.strip()}]}],
+                    system=[{"text": SYSTEM_PROMPT}],
+                    inferenceConfig={"temperature": 0.8, "topP": 0.9, "maxTokens": 100}
+                )
+                
+                response_text = response['output']['message']['content'][0]['text']
+                
+                # Converter para áudio
+                polly_response = polly.synthesize_speech(
+                    Text=response_text,
+                    OutputFormat='mp3',
+                    VoiceId='Camila',
+                    Engine='neural'
+                )
+                
+                audio_bytes = polly_response['AudioStream'].read()
+                
+                # Salvar e tocar IMEDIATAMENTE
+                st.session_state.messages.append({'input': user_input, 'response': response_text})
+                st.success(f"🗣️ Você: {user_input}")
+                st.info(f"🎓 Professora: {response_text}")
+                st.audio(audio_bytes, format='audio/mp3', autoplay=True)
+                
+            except Exception as e:
+                st.error(f"Erro: {str(e)}")
 
-# Reproduzir áudio se existir
-if st.session_state.audio_to_play:
-    audio_bytes = base64.b64decode(st.session_state.audio_to_play)
-    st.audio(audio_bytes, format='audio/mp3', autoplay=True)
-    st.session_state.audio_to_play = None
+# Histórico
+if st.session_state.messages:
+    with st.expander("📝 Histórico (clique para ver)"):
+        for msg in st.session_state.messages[-5:]:
+            st.write(f"🗣️ **Você:** {msg['input']}")
+            if 'response' in msg:
+                st.write(f"🎓 **Professora:** {msg['response']}")
+            st.divider()
 
 # Footer
 st.markdown("---")
