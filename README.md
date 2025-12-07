@@ -1,6 +1,6 @@
 # 🎓 Professora Polly! - Speech-to-Speech English Learning Assistant
 
-Assistente de voz em tempo real para aprender inglês usando AWS Bedrock (Amazon Nova Pro) e Amazon Polly.
+Assistente de voz em tempo real para aprender inglês usando AWS Bedrock (Amazon Nova) e Amazon Polly.
 
 ## 🚀 Deploy no Streamlit Cloud
 
@@ -40,9 +40,6 @@ O app será iniciado automaticamente com todas as dependências instaladas.
 ```bash
 # Instalar dependências
 pip install -r requirements.txt
-
-# Criar bucket S3
-python setup_s3.py
 
 # Iniciar app (backend inicia automaticamente)
 streamlit run app.py
