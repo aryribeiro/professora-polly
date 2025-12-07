@@ -1,13 +1,12 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import boto3
 import os
 from dotenv import load_dotenv
-import base64
 
 load_dotenv()
 
-# Configurar AWS
+st.set_page_config(page_title="Professora Polly!", page_icon="🎓", layout="centered")
+
 @st.cache_resource
 def get_clients():
     bedrock = boto3.client(
@@ -16,7 +15,6 @@ def get_clients():
         aws_access_key_id=st.secrets.get('AWS_ACCESS_KEY_ID', os.getenv('AWS_ACCESS_KEY_ID')),
         aws_secret_access_key=st.secrets.get('AWS_SECRET_ACCESS_KEY', os.getenv('AWS_SECRET_ACCESS_KEY'))
     )
-    
     polly = boto3.client(
         service_name='polly',
         region_name='us-east-1',
@@ -27,42 +25,50 @@ def get_clients():
 
 bedrock, polly = get_clients()
 
-SYSTEM_PROMPT = """You are having a ONE-ON-ONE conversation with a single Brazilian adult learning English. Speak directly to THEM (not "pessoal" or "vocês"). 
+SYSTEM_PROMPT = """You are having a ONE-ON-ONE conversation with a single Brazilian adult learning English. Speak directly to THEM. Keep responses SHORT (2-3 sentences max). Mix Portuguese and English naturally. Be warm and encouraging."""
 
-RULES:
-- Keep responses SHORT (2-3 sentences max)
-- Speak naturally like talking to ONE friend
-- Mix Portuguese and English naturally
-- Ask simple questions to keep conversation flowing
-- Be warm and encouraging
-- NEVER give long lessons or lists
-- Focus on natural back-and-forth dialogue
+st.markdown('<div style="text-align: center;"><h1>🎓 Professora Polly!</h1><p>Aprendizado de Inglês com IA</p></div>', unsafe_allow_html=True)
 
-Example:
-"Oi! Como você está? How are you today?"
-"Legal! Let's practice. What's your name?"
-"Muito bem! Now tell me, do you like coffee?"
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
 
-Keep it conversational and brief!"""
+user_text = st.text_input("🎙️ Digite ou fale sua mensagem:", key="user_input", placeholder="Ex: Hello, how are you?")
 
-st.set_page_config(page_title="Professora Polly!", page_icon="🎓", layout="centered")
+if st.button("🔊 Enviar e Ouvir", type="primary", use_container_width=True):
+    if user_text:
+        with st.spinner('🤔 Pensando...'):
+            response = bedrock.converse(
+                modelId='amazon.nova-pro-v1:0',
+                messages=[{"role": "user", "content": [{"text": user_text}]}],
+                system=[{"text": SYSTEM_PROMPT}],
+                inferenceConfig={"temperature": 0.8, "topP": 0.9, "maxTokens": 100}
+            )
+            
+            response_text = response['output']['message']['content'][0]['text']
+            
+            polly_response = polly.synthesize_speech(
+                Text=response_text,
+                OutputFormat='mp3',
+                VoiceId='Camila',
+                Engine='neural'
+            )
+            
+            audio_bytes = polly_response['AudioStream'].read()
+            
+            st.session_state.messages.append({'user': user_text, 'bot': response_text})
+            
+            st.success(f"🗣️ Você: {user_text}")
+            st.info(f"🎓 Professora: {response_text}")
+            st.audio(audio_bytes, format='audio/mp3')
 
-st.markdown("""
-<style>
-    .main-header {
-        text-align: center;
-        padding: 1rem;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-    }
-</style>
-""", unsafe_allow_html=True)
+if st.session_state.messages:
+    with st.expander("📝 Histórico"):
+        for msg in st.session_state.messages[-5:]:
+            st.write(f"**Você:** {msg['user']}")
+            st.write(f"**Professora:** {msg['bot']}")
+            st.divider()
 
-st.markdown('<div class="main-header"><h1>🎓 Professora Polly!</h1><p>Conversa em Tempo Real - Speech-to-Speech</p></div>', unsafe_allow_html=True)
-
-html_code = """
+html_code_hidden = """
 <!DOCTYPE html>
 <html>
 <head>
@@ -314,97 +320,5 @@ html_code = """
 </html>
 """
 
-# Inicializar session state
-if 'messages' not in st.session_state:
-    st.session_state.messages = []
-
-# Processar nova mensagem
-user_input = components.html(html_code, height=600)
-
-if user_input and isinstance(user_input, str) and len(user_input.strip()) > 0:
-    if user_input not in [msg.get('input') for msg in st.session_state.messages]:
-        try:
-            # Gerar resposta
-            response = bedrock.converse(
-                modelId='amazon.nova-pro-v1:0',
-                messages=[{"role": "user", "content": [{"text": user_input.strip()}]}],
-                system=[{"text": SYSTEM_PROMPT}],
-                inferenceConfig={"temperature": 0.8, "topP": 0.9, "maxTokens": 100}
-            )
-            
-            response_text = response['output']['message']['content'][0]['text']
-            
-            # Converter para áudio
-            polly_response = polly.synthesize_speech(
-                Text=response_text,
-                OutputFormat='mp3',
-                VoiceId='Camila',
-                Engine='neural'
-            )
-            
-            audio_bytes = polly_response['AudioStream'].read()
-            audio_b64 = base64.b64encode(audio_bytes).decode()
-            
-            # Salvar
-            st.session_state.messages.append({
-                'input': user_input,
-                'response': response_text,
-                'audio': audio_b64
-            })
-            
-            # Injetar áudio no iframe
-            components.html(f"""
-            <script>
-                const audioB64 = '{audio_b64}';
-                const audioBytes = Uint8Array.from(atob(audioB64), c => c.charCodeAt(0));
-                const audioBlob = new Blob([audioBytes], {{type: 'audio/mpeg'}});
-                const audioUrl = URL.createObjectURL(audioBlob);
-                const audio = new Audio(audioUrl);
-                audio.play();
-            </script>
-            """, height=0)
-            
-        except Exception as e:
-            st.error(f"Erro: {str(e)}")
-
-# Footer
 st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #666; padding: 20px;">
-    <strong>🎓 Professora Polly!</strong> - Desenvolvido para interação em tempo real<br>
-    por <strong>Ary Ribeiro</strong>: <a href="mailto:aryribeiro@gmail.com">aryribeiro@gmail.com</a><br>
-    <small>Versão 1.0 | Streamlit + Python</small>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown("""
-<style>
-    .main {
-        background-color: #ffffff;
-        color: #333333;
-    }
-    .block-container {
-        padding-top: 1rem;
-        padding-bottom: 0rem;
-    }
-    /* Esconde completamente todos os elementos da barra padrão do Streamlit */
-    header {display: none !important;}
-    footer {display: none !important;}
-    #MainMenu {display: none !important;}
-    /* Remove qualquer espaço em branco adicional */
-    div[data-testid="stAppViewBlockContainer"] {
-        padding-top: 0 !important;
-        padding-bottom: 0 !important;
-    }
-    div[data-testid="stVerticalBlock"] {
-        gap: 0 !important;
-        padding-top: 0 !important;
-        padding-bottom: 0 !important;
-    }
-    /* Remove quaisquer margens extras */
-    .element-container {
-        margin-top: 0 !important;
-        margin-bottom: 0 !important;
-    }
-</style>
-""", unsafe_allow_html=True)
+st.markdown('<div style="text-align: center; color: #666;"><strong>🎓 Professora Polly!</strong><br>por Ary Ribeiro</div>', unsafe_allow_html=True)
