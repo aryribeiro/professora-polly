@@ -1,32 +1,74 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import subprocess
-import time
+import boto3
 import os
+from dotenv import load_dotenv
+import base64
 
-# Iniciar backend automaticamente
-@st.cache_resource
-def start_backend():
-    import sys
-    import socket
+load_dotenv()
+
+# Configurar AWS
+bedrock = boto3.client(
+    service_name='bedrock-runtime',
+    region_name='us-east-1',
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+)
+
+polly = boto3.client(
+    service_name='polly',
+    region_name='us-east-1',
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+)
+
+SYSTEM_PROMPT = """You are having a ONE-ON-ONE conversation with a single Brazilian adult learning English. Speak directly to THEM (not "pessoal" or "vocês"). 
+
+RULES:
+- Keep responses SHORT (2-3 sentences max)
+- Speak naturally like talking to ONE friend
+- Mix Portuguese and English naturally
+- Ask simple questions to keep conversation flowing
+- Be warm and encouraging
+- NEVER give long lessons or lists
+- Focus on natural back-and-forth dialogue
+
+Example:
+"Oi! Como você está? How are you today?"
+"Legal! Let's practice. What's your name?"
+"Muito bem! Now tell me, do you like coffee?"
+
+Keep it conversational and brief!"""
+
+# Processar mensagem
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
+
+if 'user_input' in st.session_state and st.session_state.user_input:
+    user_text = st.session_state.user_input
+    st.session_state.user_input = None
     
-    # Verificar se backend já está rodando
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    result = sock.connect_ex(('https://ingles.streamlit.app/', 8001))
-    sock.close()
-    
-    if result == 0:
-        return None  # Backend já está rodando
-    
-    # Iniciar backend
-    backend_path = os.path.join(os.path.dirname(__file__), "backend.py")
-    backend_process = subprocess.Popen(
-        [sys.executable, backend_path]
+    # Gerar resposta
+    response = bedrock.converse(
+        modelId='amazon.nova-pro-v1:0',
+        messages=[{"role": "user", "content": [{"text": user_text}]}],
+        system=[{"text": SYSTEM_PROMPT}],
+        inferenceConfig={"temperature": 0.8, "topP": 0.9, "maxTokens": 100}
     )
-    time.sleep(3)
-    return backend_process
-
-start_backend()
+    
+    response_text = response['output']['message']['content'][0]['text']
+    
+    # Converter para áudio
+    polly_response = polly.synthesize_speech(
+        Text=response_text,
+        OutputFormat='mp3',
+        VoiceId='Camila',
+        Engine='neural'
+    )
+    
+    audio_bytes = polly_response['AudioStream'].read()
+    audio_b64 = base64.b64encode(audio_bytes).decode()
+    st.session_state.audio_response = audio_b64
 
 st.set_page_config(page_title="Professora Polly!", page_icon="🎓", layout="centered")
 
@@ -132,7 +174,13 @@ html_code = """
         
         async function connect() {
             try {
-                ws = new WebSocket('ws://ingles.streamlit.app:8001/ws');
+                // Sem WebSocket - usar Streamlit diretamente
+                isConnected = true;
+                button.className = 'connected';
+                button.innerHTML = '🔴';
+                status.textContent = '🎙️ Pressione ESPAÇO para falar';
+                await startAudioCapture();
+                return;
                 
                 ws.onopen = async () => {
                     console.log('WebSocket conectado');
@@ -225,12 +273,9 @@ html_code = """
                 const transcript = event.results[0][0].transcript;
                 console.log('Você disse:', transcript);
                 
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ text: transcript }));
-                    status.textContent = '⏳ Aguardando resposta...';
-                } else {
-                    status.textContent = '❌ Conexão perdida';
-                }
+                // Enviar para Streamlit
+                window.parent.postMessage({type: 'streamlit:setComponentValue', value: transcript}, '*');
+                status.textContent = '⏳ Aguardando resposta...';
             };
             
             recognition.onend = () => {
