@@ -357,11 +357,8 @@ if user_input and isinstance(user_input, str) and len(user_input.strip()) > 0:
 
 # Reproduzir áudio se existir
 if st.session_state.audio_to_play:
-    st.markdown(f"""
-    <audio autoplay style="display:none">
-        <source src="data:audio/mp3;base64,{st.session_state.audio_to_play}" type="audio/mp3">
-    </audio>
-    """, unsafe_allow_html=True)
+    audio_bytes = base64.b64decode(st.session_state.audio_to_play)
+    st.audio(audio_bytes, format='audio/mp3', autoplay=True)
     st.session_state.audio_to_play = None
 
 # Footer
