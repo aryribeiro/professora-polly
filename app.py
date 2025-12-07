@@ -40,36 +40,6 @@ Example:
 
 Keep it conversational and brief!"""
 
-# Processar mensagem
-if 'messages' not in st.session_state:
-    st.session_state.messages = []
-
-if 'user_input' in st.session_state and st.session_state.user_input:
-    user_text = st.session_state.user_input
-    st.session_state.user_input = None
-    
-    # Gerar resposta
-    response = bedrock.converse(
-        modelId='amazon.nova-pro-v1:0',
-        messages=[{"role": "user", "content": [{"text": user_text}]}],
-        system=[{"text": SYSTEM_PROMPT}],
-        inferenceConfig={"temperature": 0.8, "topP": 0.9, "maxTokens": 100}
-    )
-    
-    response_text = response['output']['message']['content'][0]['text']
-    
-    # Converter para áudio
-    polly_response = polly.synthesize_speech(
-        Text=response_text,
-        OutputFormat='mp3',
-        VoiceId='Camila',
-        Engine='neural'
-    )
-    
-    audio_bytes = polly_response['AudioStream'].read()
-    audio_b64 = base64.b64encode(audio_bytes).decode()
-    st.session_state.audio_response = audio_b64
-
 st.set_page_config(page_title="Professora Polly!", page_icon="🎓", layout="centered")
 
 st.markdown("""
@@ -297,7 +267,14 @@ html_code = """
             };
         }
         
-        function playAudio(audioData) {
+        // Receber áudio do Streamlit
+        window.addEventListener('message', (event) => {
+            if (event.data.type === 'playAudio') {
+                playAudio(event.data.audio);
+            }
+        });
+        
+        function playAudio(audioB64) {
             if (!isConnected) return;
             
             if (currentAudio) {
@@ -309,19 +286,15 @@ html_code = """
             button.innerHTML = '🔊';
             status.textContent = '🔊 Professora falando...';
             
-            const audioBlob = new Blob([audioData], { type: 'audio/mpeg' });
+            const audioBytes = Uint8Array.from(atob(audioB64), c => c.charCodeAt(0));
+            const audioBlob = new Blob([audioBytes], { type: 'audio/mpeg' });
             const audioUrl = URL.createObjectURL(audioBlob);
             currentAudio = new Audio(audioUrl);
             currentAudio.volume = 1.0;
             
-            currentAudio.play().then(() => {
-                console.log('Reproduzindo áudio...');
-            }).catch(e => {
-                console.error('Erro ao reproduzir:', e);
-            });
+            currentAudio.play();
             
             currentAudio.onended = () => {
-                console.log('Áudio finalizado');
                 URL.revokeObjectURL(audioUrl);
                 currentAudio = null;
                 if (isConnected) {
@@ -336,7 +309,42 @@ html_code = """
 </html>
 """
 
-components.html(html_code, height=600)
+# Receber input do componente
+user_input = components.html(html_code, height=600)
+
+# Processar input do usuário
+if user_input:
+    with st.spinner('Gerando resposta...'):
+        # Gerar resposta com Bedrock
+        response = bedrock.converse(
+            modelId='amazon.nova-pro-v1:0',
+            messages=[{"role": "user", "content": [{"text": user_input}]}],
+            system=[{"text": SYSTEM_PROMPT}],
+            inferenceConfig={"temperature": 0.8, "topP": 0.9, "maxTokens": 100}
+        )
+        
+        response_text = response['output']['message']['content'][0]['text']
+        
+        # Converter para áudio com Polly
+        polly_response = polly.synthesize_speech(
+            Text=response_text,
+            OutputFormat='mp3',
+            VoiceId='Camila',
+            Engine='neural'
+        )
+        
+        audio_bytes = polly_response['AudioStream'].read()
+        audio_b64 = base64.b64encode(audio_bytes).decode()
+        
+        # Enviar áudio de volta para o componente
+        components.html(f"""
+        <script>
+            const iframe = window.parent.document.querySelector('iframe[title="components.html"]');
+            if (iframe && iframe.contentWindow) {{
+                iframe.contentWindow.postMessage({{type: 'playAudio', audio: '{audio_b64}'}}, '*');
+            }}
+        </script>
+        """, height=0)
 
 # Footer
 st.markdown("---")
